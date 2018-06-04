@@ -1,0 +1,15 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Mas-plug-in
+Bundle-SymbolicName: es.plexus.mas-plug-in;singleton:=true
+Bundle-Version: 1.0.0.qualifier
+Require-Bundle: org.eclipse.core.runtime,
+  org.eclipse.ui
+Automatic-Module-Name: es.plexus.mas-plug-in
+Bundle-RequiredExecutionEnvironment: JavaSE-1.8
+Bundle-ClassPath: lib/poi-3.17.jar,
+ lib/poi-ooxml-3.17.jar,
+ lib/xmlbeans-2.6.0.jar,
+ lib/commons-collections4-4.1.jar,
+ lib/poi-ooxml-schemas-3.17.jar,
+ .

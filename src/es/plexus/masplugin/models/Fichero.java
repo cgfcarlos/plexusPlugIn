@@ -22,6 +22,6 @@ public class Fichero {
 	
 	@Override
 	public String toString() {
-		return this.getPath();//+this.getNombre();
+		return this.getNombre();
 	}
 }

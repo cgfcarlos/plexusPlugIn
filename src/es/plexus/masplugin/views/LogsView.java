@@ -1,30 +1,41 @@
 package es.plexus.masplugin.views;
 
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Control;
+import org.eclipse.swt.widgets.Label;
 import org.eclipse.ui.part.*;
 
+import es.plexus.masplugin.handler.PlugInHandler;
 import es.plexus.masplugin.models.Aviso;
 import es.plexus.masplugin.models.Fichero;
 import es.plexus.masplugin.models.Log;
 
 import org.eclipse.jface.viewers.*;
 import org.eclipse.swt.graphics.Image;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.eclipse.swt.layout.FillLayout;
+import org.eclipse.swt.layout.GridData;
+import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.jface.action.*;
+import org.eclipse.jface.fieldassist.AutoCompleteField;
+import org.eclipse.jface.fieldassist.ComboContentAdapter;
 //import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.ui.*;
 import org.eclipse.swt.widgets.Menu;
+import org.eclipse.swt.widgets.Table;
+import org.eclipse.swt.widgets.TableColumn;
+import org.eclipse.swt.widgets.TableItem;
+import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.CCombo;
+import org.eclipse.swt.custom.TableEditor;
+import org.eclipse.swt.events.FocusListener;
+import org.eclipse.swt.events.ModifyEvent;
+import org.eclipse.swt.events.ModifyListener;
+import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
 
 import java.io.File;
-import java.io.FileFilter;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 import javax.inject.Inject;
@@ -58,8 +69,9 @@ public class LogsView extends ViewPart {
 	private Action action1;
 	private Action action2;
 	private Action doubleClickAction;
-	private String rootPath = "C:\\Proyectos\\2018\\686-035-Abanca-AdaptacionPlataformaMultinegocio";
 	private String eclipsePath = "C:\\Program Files\\eclipse\\eclipse.exe";
+	private Composite container;
+	private PlugInHandler handler = new PlugInHandler();
 
 	class ViewLabelProvider extends LabelProvider implements ITableLabelProvider {
 		@Override
@@ -84,9 +96,10 @@ public class LogsView extends ViewPart {
 
 	@Override
 	public void createPartControl(Composite parent) {
+		container = parent;
 		viewer = new TableViewer(parent, SWT.MULTI | SWT.H_SCROLL | SWT.V_SCROLL);
 
-		List<Log> logs = listarLogs("ANPM");
+		List<Log> logs = handler.listarLogs("ANPM");
 		viewer.setContentProvider(ArrayContentProvider.getInstance());
 		viewer.setInput(logs);
 		viewer.setLabelProvider(new ViewLabelProvider());
@@ -140,8 +153,16 @@ public class LogsView extends ViewPart {
 	private void makeActions() {
 		action1 = new Action() {
 			public void run() {
-				List<Log> logs = listarLogs("ANPM");
+				TableColumn[] columns = viewer.getTable().getColumns();
+				for (TableColumn tc : columns) {
+					tc.dispose();
+				}
+				viewer.getTable().setHeaderVisible(false);
+				viewer.getTable().setLinesVisible(false);
+				List<Log> logs = handler.listarLogs("ANPM");
+				viewer.setContentProvider(ArrayContentProvider.getInstance());
 				viewer.setInput(logs);
+				viewer.setLabelProvider(new ViewLabelProvider());
 			}
 		};
 		action1.setText("Volver al listado");
@@ -151,8 +172,9 @@ public class LogsView extends ViewPart {
 
 		action2 = new Action() {
 			public void run() {
-				List<Aviso> avisos = listarAvisos("ANPM", null, null, null, null, null, null);
+				List<Aviso> avisos = handler.listarAvisos("ANPM", null, null, null, null, null, null);
 				viewer.setInput(avisos);
+				createViewer(container);
 			}
 		};
 		action2.setText("Leer Excel");
@@ -163,13 +185,14 @@ public class LogsView extends ViewPart {
 				IStructuredSelection selection = viewer.getStructuredSelection();
 				Object obj = selection.getFirstElement();
 				if (!obj.toString().contains(".java") && !obj.toString().contains(":")) {
-					List<Fichero> ficheros = listarFicheros("ANPM", obj.toString());
+					List<Fichero> ficheros = handler.listarFicheros("ANPM", obj.toString());
 					viewer.setInput(ficheros);
 				} else if (!obj.toString().contains(".java") && obj.toString().contains(":")) {
-					String path = obj.toString().split(":")[0];
-					String linea = obj.toString().split(":")[1];
-					File fPath = new File(rootPath, "trabajo/codigo/" + "ANPM" + "/src/main/java/"
-							+ path.replace('.', '/') + ".java");
+					Aviso aviso = (Aviso) obj;
+					String path = aviso.getId().split(":")[0];
+					String linea = aviso.getId().split(":")[1];
+					File fPath = new File(handler.getRootPath(),
+							"trabajo/codigo/" + "ANPM" + "/src/main/java/" + path.replace('.', '/') + ".java");
 
 					ProcessBuilder pb = new ProcessBuilder(eclipsePath, fPath.getAbsolutePath() + ":" + linea);
 					try {
@@ -178,7 +201,9 @@ public class LogsView extends ViewPart {
 						e.printStackTrace();
 					}
 				} else {
-					File fPath = new File(rootPath, "trabajo/codigo/" + obj.toString().replace('-', '/'));
+					Fichero fichero = (Fichero) obj;
+					File fPath = new File(handler.getRootPath(),
+							"trabajo/codigo/" + fichero.getPath().replace('-', '/'));
 					ProcessBuilder pb = new ProcessBuilder(eclipsePath, fPath.getAbsolutePath());
 					try {
 						pb.start();
@@ -208,122 +233,144 @@ public class LogsView extends ViewPart {
 		viewer.getControl().setFocus();
 	}
 
-	private List<Log> listarLogs(String app) {
-		File directioLogs = new File(rootPath, "trabajo/logs/" + app);
-		List<Log> logs = new ArrayList<Log>();
-		if (directioLogs.exists()) {
+	private void createViewer(Composite parent) {
+		createColumns(parent, viewer);
+		final Table table = viewer.getTable();
+		table.setHeaderVisible(true);
+		table.setLinesVisible(true);
 
-			File[] fl = directioLogs.listFiles(new FileFilter() {
-				@Override
-				public boolean accept(File pathname) {
-					return pathname.isDirectory();
-				}
-			});
-			if (null != fl) {
-				for (File f : fl) {
-					Log l = new Log();
-					l.setNombre(f.getName());
-					l.setFecha(new Date(f.lastModified()));
-					logs.add(l);
-				}
-			}
-
-		}
-		return logs;
+		viewer.setContentProvider(new ArrayContentProvider());
+		viewer.setInput(handler.listarAvisos("ANPM", null, null, null, null, null, null));
+		getSite().setSelectionProvider(viewer);
 	}
 
-	private List<Fichero> listarFicheros(String app, String uid) {
-		File logs = new File(rootPath, "trabajo/logs/" + "ANPM" + "/" + uid);
-		List<Fichero> ficheros = new ArrayList<Fichero>();
-		if (logs.exists()) {
-			Log theLog = new Log();
-			theLog.setFicherosModificados(new ArrayList<>());
-			theLog.setFicherosNuevos(new ArrayList<>());
-			walk(logs, new File(logs, "ANPM"), theLog);
-			for (Fichero fichero : theLog.getFicherosModificados()) {
-				ficheros.add(fichero);
+	private void createColumns(final Composite parent, final TableViewer viewer) {
+
+		String[] titles = { "Categoria", "Clase", "Literal", "Accion", "Codigo", "Linea", "Columna", "ExcelId" };
+		int[] bounds = { 100, 100, 100, 100, 100, 100, 100, 100 };
+
+		TableViewerColumn col = createTableViewerColumn(titles[0], bounds[0], 0);
+		col.setLabelProvider(new ColumnLabelProvider() {
+			@Override
+			public String getText(Object element) {
+				Aviso aviso = (Aviso) element;
+				return aviso.getCategoria();
 			}
-		}
-		return ficheros;
-	}
+		});
 
-	private void walk(File path, File root, Log log) {
-		File[] list = root.listFiles();
+		col = createTableViewerColumn(titles[1], bounds[1], 1);
+		col.setLabelProvider(new ColumnLabelProvider() {
+			@Override
+			public String getText(Object element) {
+				Aviso aviso = (Aviso) element;
+				return aviso.getClase();
+			}
+		});
 
-		if (list != null) {
-			for (File f : list) {
-				if (f.isDirectory()) {
-					walk(path, f, log);
-				} else {
-					String name = f.getAbsolutePath().substring(path.getAbsolutePath().length() + 1);
-					Fichero fichero = new Fichero();
-					fichero.setPath(name.replace(File.separatorChar, '-'));
-					fichero.setNombre(f.getName());
-					if (f.getName().endsWith(".original")) {
-						fichero.setNombre(fichero.getNombre().substring(0, fichero.getNombre().length() - 9));
-						fichero.setPath(fichero.getPath().substring(0, fichero.getPath().length() - 9));
-						log.getFicherosModificados().add(fichero);
-					} else if (f.getName().endsWith(".new")) {
-					} else {
-						log.getFicherosNuevos().add(fichero);
+		col = createTableViewerColumn(titles[2], bounds[2], 2);
+		col.setLabelProvider(new ColumnLabelProvider() {
+			@Override
+			public String getText(Object element) {
+				Aviso aviso = (Aviso) element;
+				return aviso.getCodigo();
+			}
+		});
+
+		col = createTableViewerColumn(titles[3], bounds[3], 3);
+		col.setLabelProvider(new ColumnLabelProvider() {
+			@Override
+			public String getText(Object element) {
+				Aviso aviso = (Aviso) element;
+				return aviso.getAccion();
+			}
+		});
+
+		col.setEditingSupport(new EditingSupport(viewer) {
+
+			@Override
+			protected void setValue(Object arg0, Object arg1) {
+				arg0 = arg1;
+			}
+
+			@Override
+			protected Object getValue(Object arg0) {
+				return arg0.toString();
+			}
+
+			@Override
+			protected CellEditor getCellEditor(Object arg0) {
+				final ComboBoxCellEditor editor = new ComboBoxCellEditor(parent, getPossibleFilterValues(),
+						SWT.READ_ONLY);
+				((CCombo) editor.getControl()).addModifyListener(new ModifyListener() {
+					@Override
+					public void modifyText(ModifyEvent arg0) {
+						IStructuredSelection sel = (IStructuredSelection) viewer.getSelection();
+						String filterValue = sel.getFirstElement().toString();
+						// Modificar excel desde aqui?
+
 					}
-				}
+				});
+				return editor;
 			}
-		}
+
+			@Override
+			protected boolean canEdit(Object arg0) {
+				return true;
+			}
+		});
+
+		col = createTableViewerColumn(titles[4], bounds[4], 4);
+		col.setLabelProvider(new ColumnLabelProvider() {
+			@Override
+			public String getText(Object element) {
+				Aviso aviso = (Aviso) element;
+				return aviso.getSentencia();
+			}
+		});
+
+		col = createTableViewerColumn(titles[5], bounds[5], 5);
+		col.setLabelProvider(new ColumnLabelProvider() {
+			@Override
+			public String getText(Object element) {
+				Aviso aviso = (Aviso) element;
+				return aviso.getLinea().toString();
+			}
+		});
+
+		col = createTableViewerColumn(titles[6], bounds[6], 6);
+		col.setLabelProvider(new ColumnLabelProvider() {
+			@Override
+			public String getText(Object element) {
+				Aviso aviso = (Aviso) element;
+				return aviso.getColumna().toString();
+			}
+		});
+
+		col = createTableViewerColumn(titles[7], bounds[7], 7);
+		col.setLabelProvider(new ColumnLabelProvider() {
+			@Override
+			public String getText(Object element) {
+				Aviso aviso = (Aviso) element;
+				return aviso.getId();
+			}
+		});
 	}
 
-	private List<Aviso> listarAvisos(String app, Integer skip, Integer limit, String tipo, Boolean soloPendientes,
-			Boolean sinResolver, Integer page) {
-		try {
-			if (null == page) {
-				page = 0;
-			}
-			if (null == limit) {
-				limit = 20;
-			}
-			if (null == skip) {
-				skip = 0;
-			}
-			List<Aviso> apps = new ArrayList<>();
-			File f = new File(rootPath, "trabajo/excels/salida/" + app + "/" + app + ".xlsx");
-			FileInputStream fin = new FileInputStream(f);
-			Workbook book = WorkbookFactory.create(fin);
-			fin.close();
-			Sheet sheetAt = book.getSheetAt(1);
-			int desde = 1 + skip + (limit * page);
+	private TableViewerColumn createTableViewerColumn(String title, int bound, final int colNumber) {
+		final TableViewerColumn viewerColumn = new TableViewerColumn(viewer, SWT.NONE);
+		final TableColumn column = viewerColumn.getColumn();
+		column.setText(title);
+		column.setWidth(bound);
+		column.setResizable(true);
+		column.setMoveable(true);
 
-			for (int i = desde; i <= sheetAt.getLastRowNum(); i++) {
-				Row row = sheetAt.getRow(i);
-				String accion = row.getCell(4).getStringCellValue();
-				String rowTipo = row.getCell(1).getStringCellValue();
-				if (tipo != null && !tipo.equals(rowTipo)) {
-					continue;
-				}
-				if (Boolean.TRUE.equals(soloPendientes) && !"".equals(accion)) {
-					continue;
-				}
-				if (Boolean.TRUE.equals(sinResolver) && ("SI".equals(accion) || "NO".equals(accion))) {
-					continue;
-				}
-				Aviso aviso = new Aviso();
-				aviso.setAccion(accion);
-				aviso.setCategoria(rowTipo);
-				aviso.setCodigo(row.getCell(3).getStringCellValue());
-				aviso.setSentencia(row.getCell(5).getStringCellValue());
-				aviso.setClase(row.getCell(6).getStringCellValue());
-				aviso.setLinea((int) row.getCell(7).getNumericCellValue());
-				aviso.setColumna((int) row.getCell(8).getNumericCellValue());
-				// aviso.setId(String.valueOf(row.getRowNum()));
-				aviso.setId(row.getCell(9).getStringCellValue());
-				apps.add(aviso);
-//				if (apps.size() == limit) {
-//					break;
-//				}
-			}
-			return apps;
-		} catch (Exception ex) {
-			ex.printStackTrace();
-			return null;
+		if (colNumber == 3) {
+
 		}
+		return viewerColumn;
+	}
+
+	private String[] getPossibleFilterValues() {
+		return new String[] { "SI", "NO", "DUDA" };
 	}
 }
